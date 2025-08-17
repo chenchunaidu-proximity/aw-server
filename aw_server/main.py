@@ -1,5 +1,7 @@
 import logging
 import sys
+import socket
+
 
 from aw_core.log import setup_logging
 from aw_datastore import get_storage_methods
@@ -38,7 +40,7 @@ def main():
     if settings.custom_static:
         logger.info(f"Using custom_static: {settings.custom_static}")
 
-    logger.info("Starting up...")
+    logger.info(f"Starting up... on {socket.gethostname()}")
     _start(
         host=settings.host,
         port=settings.port,
