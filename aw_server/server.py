@@ -18,6 +18,7 @@ from . import rest
 from .api import ServerAPI
 from .custom_static import get_custom_static_blueprint
 from .log import FlaskLogHandler
+from .scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class AWFlask(Flask):
         custom_static=dict(),
         static_folder=static_folder,
         static_url_path="",
+        scheduler_interval_minutes=10
     ):
         name = "aw-server"
         self.json_provider_class = CustomJSONProvider
@@ -60,9 +62,16 @@ class AWFlask(Flask):
         db = Datastore(storage_method, testing=testing)
         self.api = ServerAPI(db=db, testing=testing)
 
+        # Start the data scheduler
+        start_scheduler(self.api, scheduler_interval_minutes)
+
         self.register_blueprint(root)
         self.register_blueprint(rest.blueprint)
         self.register_blueprint(get_custom_static_blueprint(custom_static))
+
+    def cleanup(self):
+        """Cleanup resources when shutting down."""
+        stop_scheduler()
 
 
 class CustomJSONProvider(flask.json.provider.DefaultJSONProvider):
@@ -121,6 +130,7 @@ def _start(
     testing: bool = False,
     cors_origins: List[str] = [],
     custom_static: Dict[str, str] = dict(),
+    scheduler_interval_minutes: int = 10,
 ):
     app = AWFlask(
         host,
@@ -128,6 +138,7 @@ def _start(
         storage_method=storage_method,
         cors_origins=cors_origins,
         custom_static=custom_static,
+        scheduler_interval_minutes=scheduler_interval_minutes,
     )
     try:
         app.run(
@@ -141,3 +152,6 @@ def _start(
     except OSError as e:
         logger.exception(e)
         raise e
+    finally:
+        # Ensure cleanup is called when the server stops
+        app.cleanup()

@@ -41,6 +41,8 @@ def main():
         logger.info(f"Using custom_static: {settings.custom_static}")
 
     logger.info(f"Starting up... on {socket.gethostname()}")
+    logger.info(f"Data scheduler will run every {settings.scheduler_interval_minutes} minutes")
+
     _start(
         host=settings.host,
         port=settings.port,
@@ -48,6 +50,7 @@ def main():
         storage_method=storage_method,
         cors_origins=settings.cors_origins,
         custom_static=settings.custom_static,
+        scheduler_interval_minutes=settings.scheduler_interval_minutes,
     )
 
 
@@ -91,6 +94,13 @@ def parse_settings():
         dest="custom_static",
         help="The custom static directories. Format: watcher_name=path,watcher_name2=path2,...",
     )
+    parser.add_argument(
+        "--scheduler-interval",
+        dest="scheduler_interval_minutes",
+        type=int,
+        help="How often the data scheduler should run (in minutes, default: 10)",
+    )
+
     args = parser.parse_args()
     if args.version:
         print(__version__)
@@ -104,6 +114,7 @@ def parse_settings():
     settings.storage = config[configsection]["storage"]
     settings.cors_origins = config[configsection]["cors_origins"]
     settings.custom_static = dict(config[configsection]["custom_static"])
+    settings.scheduler_interval_minutes = int(config[configsection]["scheduler_interval_minutes"])
 
     """ If a argument is not none, override the config value """
     for key, value in vars(args).items():
