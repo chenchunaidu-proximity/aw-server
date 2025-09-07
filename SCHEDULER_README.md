@@ -22,6 +22,7 @@ The scheduler requires authentication token and backend API URL to be configured
 Use the ActivityWatch URL scheme to automatically configure both token and URL:
 
 **From Web Application:**
+
 ```javascript
 const token = "your-auth-token";
 const apiUrl = encodeURIComponent("http://localhost:4000/activities");
@@ -29,6 +30,7 @@ window.location.href = `activitywatch://token?token=${token}&url=${apiUrl}`;
 ```
 
 **From Command Line:**
+
 ```bash
 # macOS
 open "activitywatch://token?token=your-token-here&url=http://localhost:4000/activities"
@@ -71,6 +73,7 @@ curl http://localhost:5600/api/0/token
 ```
 
 Expected response:
+
 ```json
 {
   "token": "your-auth-token-here",
@@ -128,6 +131,7 @@ The scheduler follows this process every 10 minutes:
 The scheduler sends data to the backend API in this format:
 
 **Request:**
+
 ```http
 POST http://localhost:4000/activities
 Authorization: Bearer your-auth-token
@@ -158,6 +162,7 @@ Content-Type: application/json
 ```
 
 **Expected Response:**
+
 ```http
 HTTP/1.1 201 Created
 Content-Type: application/json
@@ -209,20 +214,24 @@ WARNING: API call failed, events not deleted
 ### Common Issues
 
 **"No authentication token and URL found, skipping API call"**
+
 - Configure authentication using one of the methods in the Authentication Setup section
 - Verify configuration with: `curl http://localhost:5600/api/0/token`
 
 **"Failed to send events to backend API: Connection refused"**
+
 - Check if the backend API server is running
 - Verify the URL is correct in the stored configuration
 - Check firewall and network connectivity
 
 **"Backend API returned status 401"**
+
 - Verify the authentication token is valid
 - Check if the token has expired
 - Ensure the backend API accepts the token format
 
 **"Events not deleted from local storage"**
+
 - This is expected behavior when API calls fail
 - Events will be retried in the next cycle (10 minutes)
 - Check the API response status (should be 201 for success)
@@ -230,11 +239,13 @@ WARNING: API call failed, events not deleted
 ### Debug Steps
 
 1. **Check Authentication Status:**
+
    ```bash
    curl http://localhost:5600/api/0/token
    ```
 
 2. **Test API Endpoint Manually:**
+
    ```bash
    curl -X POST http://localhost:4000/activities \
      -H "Authorization: Bearer your-token" \
@@ -243,6 +254,7 @@ WARNING: API call failed, events not deleted
    ```
 
 3. **Check ActivityWatch Logs:**
+
    ```bash
    tail -f ~/.local/share/activitywatch/aw-server/logs/aw-server.log
    ```
