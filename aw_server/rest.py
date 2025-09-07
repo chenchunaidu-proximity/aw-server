@@ -404,3 +404,66 @@ class SettingsResource(Resource):
             raise BadRequest("MissingParameter", "Missing required parameter key")
         data = current_app.api.set_setting(key, request.get_json())
         return data
+
+
+# TOKEN MANAGEMENT
+
+
+@api.route("/0/token")
+class TokenResource(Resource):
+    def get(self):
+        """Get stored authentication token"""
+        token = current_app.api.get_token()
+        return {"token": token}, 200
+
+    def post(self):
+        """Store authentication token"""
+        data = request.get_json()
+        if not data or "token" not in data:
+            raise BadRequest("MissingParameter", "Missing required parameter token")
+        
+        token = data["token"]
+        current_app.api.store_token(token)
+        return {"message": "Token stored successfully"}, 200
+
+    def delete(self):
+        """Delete stored authentication token"""
+        current_app.api.delete_token()
+        return {"message": "Token deleted successfully"}, 200
+
+
+# URL SCHEME HANDLING
+
+
+@api.route("/0/url-scheme")
+class UrlSchemeResource(Resource):
+    def post(self):
+        """Handle URL scheme requests and extract token"""
+        data = request.get_json()
+        if not data or "url" not in data:
+            raise BadRequest("MissingParameter", "Missing required parameter url")
+        
+        url = data["url"]
+        
+        # Extract token from URL
+        # Expected format: activitywatch://token?token=YOUR_TOKEN
+        if url.startswith("activitywatch://"):
+            # Remove the scheme part
+            url_part = url[17:]  # Remove "activitywatch://"
+            
+            # Check if it's a token format
+            if "token=" in url_part:
+                token = url_part.split("token=")[1]
+                # Remove any additional parameters
+                token = token.split("&")[0]
+                token = token.split("?")[0]
+                
+                if token:
+                    current_app.api.store_token(token)
+                    return {"message": f"Token extracted and stored from URL: {url}"}, 200
+                else:
+                    raise BadRequest("InvalidToken", "No token found in URL")
+            else:
+                raise BadRequest("InvalidFormat", "URL does not contain token parameter")
+        else:
+            raise BadRequest("InvalidScheme", "URL must start with activitywatch://")

@@ -365,3 +365,15 @@ class ServerAPI:
         """Set a setting"""
         self.settings[key] = value
         return value
+
+    def store_token(self, token: str) -> None:
+        """Store authentication token"""
+        self.db.storage_strategy.store_token(token)
+
+    def get_token(self) -> Optional[str]:
+        """Get stored authentication token"""
+        return self.db.storage_strategy.get_token()
+
+    def delete_token(self) -> None:
+        """Delete stored authentication token"""
+        self.db.storage_strategy.delete_token()

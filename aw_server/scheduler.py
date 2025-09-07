@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+import requests
 from datetime import datetime
 from typing import Dict, List
 
@@ -11,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 class DataScheduler:
     """
-    A scheduler that fetches data from the database, prints it, and deletes it every 10 minutes.
+    A scheduler that fetches data from the database, sends it to backend API, and deletes it every 10 minutes.
+    Events are only deleted if the API call is successful.
     """
     
     def __init__(self, api_instance, interval_minutes: int = 10):
@@ -59,9 +61,15 @@ class DataScheduler:
                 time.sleep(self.interval_seconds)
                 
     def _process_data(self):
-        """Fetch data from all buckets, print it, and delete it."""
+        """Fetch data from all buckets, send to backend API, and delete it."""
         try:
             logger.info("Starting scheduled data processing...")
+            
+            # Get stored token
+            token = self.api.get_token()
+            if not token:
+                logger.warning("No authentication token found, skipping API call")
+                return
             
             # Get all buckets
             buckets = self.api.get_buckets()
@@ -72,29 +80,49 @@ class DataScheduler:
             total_events_processed = 0
             total_events_deleted = 0
             
+            # Collect all events from all buckets
+            all_events = []
             for bucket_id in buckets.keys():
                 try:
-                    events_processed, events_deleted = self._process_bucket(bucket_id)
+                    events_processed, events_data = self._collect_bucket_events(bucket_id)
                     total_events_processed += events_processed
-                    total_events_deleted += events_deleted
+                    all_events.extend(events_data)
                 except Exception as e:
-                    logger.error(f"Error processing bucket {bucket_id}: {e}")
-                    
-            logger.info(f"Scheduled processing completed: {total_events_processed} events processed, {total_events_deleted} events deleted (last events preserved for merging)")
+                    logger.error(f"Error collecting events from bucket {bucket_id}: {e}")
+            
+            if not all_events:
+                logger.info("No events to send")
+                return
+            
+            # Send events to backend API
+            success = self._send_events_to_api(all_events, token)
+            
+            if success:
+                # Only delete events if API call was successful
+                for bucket_id in buckets.keys():
+                    try:
+                        events_deleted = self._delete_bucket_events(bucket_id)
+                        total_events_deleted += events_deleted
+                    except Exception as e:
+                        logger.error(f"Error deleting events from bucket {bucket_id}: {e}")
+                        
+                logger.info(f"Scheduled processing completed: {total_events_processed} events processed, {total_events_deleted} events deleted (last events preserved for merging)")
+            else:
+                logger.warning("API call failed, events not deleted")
             
         except Exception as e:
             logger.error(f"Error in data processing: {e}")
             
-    def _process_bucket(self, bucket_id: str) -> tuple[int, int]:
+    def _collect_bucket_events(self, bucket_id: str) -> tuple[int, List[Dict]]:
         """
-        Process a single bucket: fetch events, print them, and delete them.
+        Collect events from a single bucket for API sending.
         Ignores the last event as it will be used for merging later.
         
         Args:
             bucket_id: The ID of the bucket to process
             
         Returns:
-            Tuple of (events_processed, events_deleted)
+            Tuple of (events_processed, events_data)
         """
         try:
             # Get all events from the bucket (limit=-1 means no limit)
@@ -102,77 +130,109 @@ class DataScheduler:
             
             if not events:
                 logger.debug(f"Bucket {bucket_id}: No events found")
-                return 0, 0
+                return 0, []
                 
             # Skip the last event as it will be used for merging later
             if len(events) <= 1:
                 logger.debug(f"Bucket {bucket_id}: Only one event found, skipping to preserve for merging")
-                return 0, 0
+                return 0, []
                 
             # Remove the last event from processing
             events_to_process = events[:-1]
-            last_event = events[-1]
             
-            logger.info(f"Bucket {bucket_id}: Processing {len(events_to_process)} events (keeping last event for merging)")
+            logger.info(f"Bucket {bucket_id}: Collecting {len(events_to_process)} events (keeping last event for merging)")
             
-            # Print the events (excluding the last one)
-            self._print_events(bucket_id, events_to_process)
+            # Add bucket_id to each event for API
+            events_with_bucket = []
+            for event in events_to_process:
+                event_data = event.copy()
+                event_data['bucket_id'] = bucket_id
+                events_with_bucket.append(event_data)
             
-            # Delete the events (excluding the last one)
-            deleted_count = self._delete_events(bucket_id, events_to_process)
-            
-            logger.info(f"Bucket {bucket_id}: {len(events_to_process)} events processed, {deleted_count} events deleted (last event preserved)")
-            return len(events_to_process), deleted_count
+            return len(events_to_process), events_with_bucket
             
         except Exception as e:
-            logger.error(f"Error processing bucket {bucket_id}: {e}")
-            return 0, 0
-            
-    def _print_events(self, bucket_id: str, events: List[Dict]):
-        """Print events in a readable format."""
-        print(f"\n{'='*60}")
-        print(f"BUCKET: {bucket_id}")
-        print(f"TIMESTAMP: {datetime.now().isoformat()}")
-        print(f"EVENT COUNT: {len(events)} (last event preserved for merging)")
-        print(f"{'='*60}")
-        
-        for i, event in enumerate(events, 1):
-            print(f"\nEvent {i}:")
-            print(f"  ID: {event.get('id', 'N/A')}")
-            print(f"  Timestamp: {event.get('timestamp', 'N/A')}")
-            print(f"  Duration: {event.get('duration', 'N/A')}")
-            print(f"  Data: {event.get('data', {})}")
-            
-        print(f"\n{'='*60}\n")
-        
-    def _delete_events(self, bucket_id: str, events: List[Dict]) -> int:
+            logger.error(f"Error collecting events from bucket {bucket_id}: {e}")
+            return 0, []
+
+    def _send_events_to_api(self, events: List[Dict], token: str) -> bool:
         """
-        Delete events from the bucket.
+        Send events to the backend API.
+        
+        Args:
+            events: List of events to send
+            token: Authentication token
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            url = "http://localhost:4000/activities"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = events
+            
+            logger.info(f"Sending {len(events)} events to backend API at {url}")
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 201:
+                logger.info("Successfully sent events to backend API")
+                return True
+            else:
+                logger.error(f"Backend API returned status {response.status_code}: {response.text}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send events to backend API: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error sending events to API: {e}")
+            return False
+
+    def _delete_bucket_events(self, bucket_id: str) -> int:
+        """
+        Delete events from a bucket (excluding the last event).
         
         Args:
             bucket_id: The bucket ID
-            events: List of events to delete
             
         Returns:
             Number of events successfully deleted
         """
-        deleted_count = 0
-        
-        for event in events:
-            try:
-                event_id = event.get('id')
-                if event_id is not None:
-                    success = self.api.delete_event(bucket_id, event_id)
-                    if success:
-                        deleted_count += 1
-                    else:
-                        logger.warning(f"Failed to delete event {event_id} from bucket {bucket_id}")
-                else:
-                    logger.warning(f"Event has no ID, cannot delete: {event}")
-            except Exception as e:
-                logger.error(f"Error deleting event {event.get('id', 'unknown')} from bucket {bucket_id}: {e}")
+        try:
+            # Get all events from the bucket
+            events = self.api.get_events(bucket_id, limit=-1)
+            
+            if not events or len(events) <= 1:
+                return 0
                 
-        return deleted_count
+            # Remove the last event from deletion
+            events_to_delete = events[:-1]
+            
+            deleted_count = 0
+            for event in events_to_delete:
+                try:
+                    event_id = event.get('id')
+                    if event_id is not None:
+                        success = self.api.delete_event(bucket_id, event_id)
+                        if success:
+                            deleted_count += 1
+                        else:
+                            logger.warning(f"Failed to delete event {event_id} from bucket {bucket_id}")
+                    else:
+                        logger.warning(f"Event has no ID, cannot delete: {event}")
+                except Exception as e:
+                    logger.error(f"Error deleting event {event.get('id', 'unknown')} from bucket {bucket_id}: {e}")
+                    
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error deleting events from bucket {bucket_id}: {e}")
+            return 0
 
 
 # Global scheduler instance
