@@ -65,11 +65,13 @@ class DataScheduler:
         try:
             logger.info("Starting scheduled data processing...")
             
-            # Get stored token
-            token = self.api.get_token()
-            if not token:
-                logger.warning("No authentication token found, skipping API call")
+            # Get stored token and URL
+            token_data = self.api.get_token_data()
+            if not token_data:
+                logger.warning("No authentication token and URL found, skipping API call")
                 return
+            
+            token, api_url = token_data
             
             # Get all buckets
             buckets = self.api.get_buckets()
@@ -95,7 +97,7 @@ class DataScheduler:
                 return
             
             # Send events to backend API
-            success = self._send_events_to_api(all_events, token)
+            success = self._send_events_to_api(all_events, token, api_url)
             
             if success:
                 # Only delete events if API call was successful
@@ -155,19 +157,19 @@ class DataScheduler:
             logger.error(f"Error collecting events from bucket {bucket_id}: {e}")
             return 0, []
 
-    def _send_events_to_api(self, events: List[Dict], token: str) -> bool:
+    def _send_events_to_api(self, events: List[Dict], token: str, api_url: str) -> bool:
         """
         Send events to the backend API.
         
         Args:
             events: List of events to send
             token: Authentication token
+            api_url: Backend API URL
             
         Returns:
             True if successful, False otherwise
         """
         try:
-            url = "http://localhost:4000/activities"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
@@ -175,9 +177,9 @@ class DataScheduler:
             
             payload = events
             
-            logger.info(f"Sending {len(events)} events to backend API at {url}")
+            logger.info(f"Sending {len(events)} events to backend API at {api_url}")
             
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
             
             if response.status_code == 201:
                 logger.info("Successfully sent events to backend API")
