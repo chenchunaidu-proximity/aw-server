@@ -25,8 +25,7 @@ class DataScheduler:
             interval_minutes: How often to run the scheduler (default: 10 minutes)
         """
         self.api = api_instance
-        # FIXME: add * 60
-        self.interval_seconds = interval_minutes
+        self.interval_seconds = interval_minutes * 60
         self.running = False
         self.thread = None
         
