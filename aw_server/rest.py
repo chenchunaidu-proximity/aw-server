@@ -450,10 +450,10 @@ class UrlSchemeResource(Resource):
         url = data["url"]
         
         # Extract token and URL from URL scheme
-        # Expected format: activitywatch://token?token=YOUR_TOKEN&url=API_URL
-        if url.startswith("activitywatch://"):
+        # Expected format: samay://token?token=YOUR_TOKEN&url=API_URL
+        if url.startswith("samay://"):
             # Remove the scheme part
-            url_part = url[17:]  # Remove "activitywatch://"
+            url_part = url[8:]  # Remove "samay://"
             
             # Parse query parameters
             params = {}
@@ -479,4 +479,4 @@ class UrlSchemeResource(Resource):
                     missing.append("url")
                 raise BadRequest("MissingParameter", f"Missing required parameters: {', '.join(missing)}")
         else:
-            raise BadRequest("InvalidScheme", "URL must start with activitywatch://")
+            raise BadRequest("InvalidScheme", "URL must start with samay://")
