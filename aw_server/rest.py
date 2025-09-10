@@ -404,3 +404,79 @@ class SettingsResource(Resource):
             raise BadRequest("MissingParameter", "Missing required parameter key")
         data = current_app.api.set_setting(key, request.get_json())
         return data
+
+
+# TOKEN MANAGEMENT
+
+
+@api.route("/0/token")
+class TokenResource(Resource):
+    def get(self):
+        """Get stored authentication token and URL"""
+        token_data = current_app.api.get_token_data()
+        if token_data:
+            token, url = token_data
+            return {"token": token, "url": url}, 200
+        return {"token": None, "url": None}, 200
+
+    def post(self):
+        """Store authentication token and URL"""
+        data = request.get_json()
+        if not data or "token" not in data or "url" not in data:
+            raise BadRequest("MissingParameter", "Missing required parameters token and url")
+        
+        token = data["token"]
+        url = data["url"]
+        current_app.api.store_token_data(token, url)
+        return {"message": "Token and URL stored successfully"}, 200
+
+    def delete(self):
+        """Delete stored authentication token and URL"""
+        current_app.api.delete_token_data()
+        return {"message": "Token and URL deleted successfully"}, 200
+
+
+# URL SCHEME HANDLING
+
+
+@api.route("/0/url-scheme")
+class UrlSchemeResource(Resource):
+    def post(self):
+        """Handle URL scheme requests and extract token and URL"""
+        data = request.get_json()
+        if not data or "url" not in data:
+            raise BadRequest("MissingParameter", "Missing required parameter url")
+        
+        url = data["url"]
+        
+        # Extract token and URL from URL scheme
+        # Expected format: samay://token?token=YOUR_TOKEN&url=API_URL
+        if url.startswith("samay://"):
+            # Remove the scheme part
+            url_part = url[8:]  # Remove "samay://"
+            
+            # Parse query parameters
+            params = {}
+            if "?" in url_part:
+                query_string = url_part.split("?")[1]
+                for param in query_string.split("&"):
+                    if "=" in param:
+                        key, value = param.split("=", 1)
+                        params[key] = value
+            
+            # Extract token and URL
+            token = params.get("token")
+            api_url = params.get("url")
+            
+            if token and api_url:
+                current_app.api.store_token_data(token, api_url)
+                return {"message": f"Token and URL extracted and stored from URL: {url}"}, 200
+            else:
+                missing = []
+                if not token:
+                    missing.append("token")
+                if not api_url:
+                    missing.append("url")
+                raise BadRequest("MissingParameter", f"Missing required parameters: {', '.join(missing)}")
+        else:
+            raise BadRequest("InvalidScheme", "URL must start with samay://")
