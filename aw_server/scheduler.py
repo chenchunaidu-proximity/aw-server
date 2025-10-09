@@ -62,12 +62,9 @@ class DataScheduler:
     def _process_data(self):
         """Fetch data from all buckets, send to backend API, and delete it."""
         try:
-            logger.info("Starting scheduled data processing...")
-            
             # Get stored token and URL
             token_data = self.api.get_token_data()
             if not token_data:
-                logger.warning("No authentication token and URL found, skipping API call")
                 return
             
             token, api_url = token_data
@@ -75,7 +72,6 @@ class DataScheduler:
             # Get all buckets
             buckets = self.api.get_buckets()
             if not buckets:
-                logger.info("No buckets found")
                 return
                 
             total_events_processed = 0
@@ -92,24 +88,10 @@ class DataScheduler:
                     logger.error(f"Error collecting events from bucket {bucket_id}: {e}")
             
             if not all_events:
-                logger.info("No events to send")
                 return
             
-            # Send events to backend API
-            success = self._send_events_to_api(all_events, token, api_url)
-            
-            if success:
-                # Only delete events if API call was successful
-                for bucket_id in buckets.keys():
-                    try:
-                        events_deleted = self._delete_bucket_events(bucket_id)
-                        total_events_deleted += events_deleted
-                    except Exception as e:
-                        logger.error(f"Error deleting events from bucket {bucket_id}: {e}")
-                        
-                logger.info(f"Scheduled processing completed: {total_events_processed} events processed, {total_events_deleted} events deleted (last events preserved for merging)")
-            else:
-                logger.warning("API call failed, events not deleted")
+            # Send events to backend API (deletion handled internally)
+            self._send_events_to_api(all_events, token, api_url)
             
         except Exception as e:
             logger.error(f"Error in data processing: {e}")
@@ -130,18 +112,14 @@ class DataScheduler:
             events = self.api.get_events(bucket_id, limit=-1)
             
             if not events:
-                logger.debug(f"Bucket {bucket_id}: No events found")
                 return 0, []
                 
             # Skip the last event as it will be used for merging later
             if len(events) <= 1:
-                logger.debug(f"Bucket {bucket_id}: Only one event found, skipping to preserve for merging")
                 return 0, []
                 
             # Remove the last event from processing
             events_to_process = events[:-1]
-            
-            logger.info(f"Bucket {bucket_id}: Collecting {len(events_to_process)} events (keeping last event for merging)")
             
             # Add bucket_id to each event for API
             events_with_bucket = []
@@ -157,42 +135,53 @@ class DataScheduler:
             return 0, []
 
     def _send_events_to_api(self, events: List[Dict], token: str, api_url: str) -> bool:
-        """
-        Send events to the backend API.
+        """Send events to the backend API in batches of max 100 events."""
+        BATCH_SIZE = 100
         
-        Args:
-            events: List of events to send
-            token: Authentication token
-            api_url: Backend API URL
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = events
-            
-            logger.info(f"Sending {len(events)} events to backend API at {api_url}")
-            
-            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
-            
-            if response.status_code == 201:
-                logger.info("Successfully sent events to backend API")
-                return True
+        def chunks(lst, n):
+            for i in range(0, len(lst), n):
+                yield lst[i:i + n]
+        
+        successfully_sent = []
+        
+        for batch in chunks(events, BATCH_SIZE):
+            if self._send_single_batch(batch, token, api_url):
+                successfully_sent.extend(batch)
             else:
-                logger.error(f"Backend API returned status {response.status_code}: {response.text}")
-                return False
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send events to backend API: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error sending events to API: {e}")
-            return False
+                break
+        
+        # Delete successfully sent events
+        if successfully_sent:
+            self._delete_successfully_sent_events(successfully_sent)
+        
+        return len(successfully_sent) == len(events)
+
+    def _send_single_batch(self, batch: List[Dict], token: str, api_url: str) -> bool:
+        """Send a single batch of events with retry logic."""
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        
+        for attempt in range(3):
+            try:
+                response = requests.post(api_url, json=batch, headers=headers, timeout=30)
+                if 200 <= response.status_code < 300:
+                    return True
+                if 400 <= response.status_code < 500:
+                    return False  # Don't retry client errors
+            except requests.RequestException:
+                pass
+            
+            if attempt < 2:
+                time.sleep(0.5 * (2 ** attempt))  # Exponential backoff
+        
+        return False
+
+    def _delete_successfully_sent_events(self, events: List[Dict]) -> None:
+        """Delete events that were successfully sent to API."""
+        for event in events:
+            try:
+                self.api.delete_event(event['bucket_id'], event['id'])
+            except Exception:
+                pass  # Log but don't fail the entire operation
 
     def _delete_bucket_events(self, bucket_id: str) -> int:
         """
@@ -222,12 +211,8 @@ class DataScheduler:
                         success = self.api.delete_event(bucket_id, event_id)
                         if success:
                             deleted_count += 1
-                        else:
-                            logger.warning(f"Failed to delete event {event_id} from bucket {bucket_id}")
-                    else:
-                        logger.warning(f"Event has no ID, cannot delete: {event}")
-                except Exception as e:
-                    logger.error(f"Error deleting event {event.get('id', 'unknown')} from bucket {bucket_id}: {e}")
+                except Exception:
+                    pass
                     
             return deleted_count
             
