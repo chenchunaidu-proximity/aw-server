@@ -38,14 +38,12 @@ class DataScheduler:
         self.running = True
         self.thread = threading.Thread(target=self._run_scheduler, daemon=True)
         self.thread.start()
-        logger.info(f"Data scheduler started with {self.interval_seconds//60} minute intervals")
         
     def stop(self):
         """Stop the scheduler."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
-        logger.info("Data scheduler stopped")
         
     def _run_scheduler(self):
         """Main scheduler loop."""

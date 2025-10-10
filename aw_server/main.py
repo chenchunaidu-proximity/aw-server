@@ -32,16 +32,8 @@ def main():
         log_file=True,
     )
 
-    logger.info(f"Using storage method: {settings.storage}")
-
     if settings.testing:
-        logger.info("Will run in testing mode")
-
-    if settings.custom_static:
-        logger.info(f"Using custom_static: {settings.custom_static}")
-
-    logger.info(f"Starting up... on {socket.gethostname()}")
-    logger.info(f"Data scheduler will run every {settings.scheduler_interval_minutes} minutes")
+        logger.info("Running in testing mode")
 
     _start(
         host=settings.host,
