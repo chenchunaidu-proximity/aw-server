@@ -63,9 +63,12 @@ class DataScheduler:
     def _process_data(self):
         """Fetch data from all buckets, send to backend API, and delete it."""
         try:
-            # Get stored token and URL
-            token_data = self.api.get_token_data()
+            # Get stored token and URL from JSON storage
+            from aw_datastore.storages.token_manager import TokenManager
+            token_manager = TokenManager(testing=False)
+            token_data = token_manager.get_token_data()
             if not token_data:
+                logger.debug("No authentication token found, skipping data processing")
                 return
             
             token, api_url = token_data
