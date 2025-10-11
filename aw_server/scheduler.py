@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Dict, List
 
 from aw_core.models import Event
-from .utils import chunks, retry_api_call
+from aw_datastore.storages.peewee import chunks
+from .utils import retry_api_call
 
 logger = logging.getLogger(__name__)
 

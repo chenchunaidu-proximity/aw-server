@@ -5,12 +5,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def chunks(lst, n):
-    """Split a list into chunks of size n."""
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
-
-
 def retry_api_call(func, *args, max_attempts=3, base_delay=0.5, **kwargs):
     for attempt in range(max_attempts):
         try:
