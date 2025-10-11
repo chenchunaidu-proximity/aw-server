@@ -6,8 +6,11 @@ from datetime import datetime
 from typing import Dict, List
 
 from aw_core.models import Event
+from .utils import chunks, retry_api_call
 
 logger = logging.getLogger(__name__)
+
+BATCH_SIZE = 100
 
 
 class DataScheduler:
@@ -134,11 +137,6 @@ class DataScheduler:
 
     def _send_events_to_api(self, events: List[Dict], token: str, api_url: str) -> bool:
         """Send events to the backend API in batches of max 100 events."""
-        BATCH_SIZE = 100
-        
-        def chunks(lst, n):
-            for i in range(0, len(lst), n):
-                yield lst[i:i + n]
         
         successfully_sent = []
         
@@ -158,20 +156,16 @@ class DataScheduler:
         """Send a single batch of events with retry logic."""
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
-        for attempt in range(3):
-            try:
-                response = requests.post(api_url, json=batch, headers=headers, timeout=30)
-                if 200 <= response.status_code < 300:
-                    return True
-                if 400 <= response.status_code < 500:
-                    return False  # Don't retry client errors
-            except requests.RequestException:
-                pass
-            
-            if attempt < 2:
-                time.sleep(0.5 * (2 ** attempt))  # Exponential backoff
+        def make_request():
+            response = requests.post(api_url, json=batch, headers=headers, timeout=30)
+            if 200 <= response.status_code < 300:
+                return True
+            elif 400 <= response.status_code < 500:
+                return False  # Don't retry client errors
+            else:
+                raise requests.RequestException(f"Server error {response.status_code}")
         
-        return False
+        return retry_api_call(make_request, max_attempts=3, base_delay=0.5)
 
     def _delete_successfully_sent_events(self, events: List[Dict]) -> None:
         """Delete events that were successfully sent to API."""
