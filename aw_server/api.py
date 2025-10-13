@@ -366,19 +366,3 @@ class ServerAPI:
         self.settings[key] = value
         return value
 
-    def store_token_data(self, token: str, url: str) -> None:
-        """Store authentication token and API URL"""
-        self.db.storage_strategy.store_token_data(token, url)
-
-    def get_token_data(self) -> Optional[tuple[str, str]]:
-        """Get stored authentication token and API URL as (token, url)"""
-        return self.db.storage_strategy.get_token_data()
-
-    def delete_token_data(self) -> None:
-        """Delete stored authentication token and API URL"""
-        self.db.storage_strategy.delete_token_data()
-
-    def get_token(self) -> Optional[str]:
-        """Get stored authentication token (for backward compatibility)"""
-        token_data = self.get_token_data()
-        return token_data[0] if token_data else None
