@@ -36,12 +36,14 @@ class DataScheduler:
     def start(self):
         """Start the scheduler in a separate thread."""
         if self.running:
-            logger.warning("Scheduler is already running")
+            logger.warning("===>> Scheduler is already running")
             return
             
+        logger.info(f"===>> Starting DataScheduler with {self.interval_seconds/60:.1f} minute interval")
         self.running = True
         self.thread = threading.Thread(target=self._run_scheduler, daemon=True)
         self.thread.start()
+        logger.info("===>> DataScheduler thread started successfully")
         
     def stop(self):
         """Stop the scheduler."""
@@ -51,34 +53,44 @@ class DataScheduler:
         
     def _run_scheduler(self):
         """Main scheduler loop."""
+        logger.info("===>> DataScheduler main loop started")
+        cycle_count = 0
         while self.running:
             try:
+                cycle_count += 1
+                logger.info(f"===>> Starting scheduler cycle #{cycle_count}")
                 self._process_data()
+                logger.info(f"===>> Completed scheduler cycle #{cycle_count}, waiting {self.interval_seconds/60:.1f} minutes")
                 # Wait for the next interval
                 time.sleep(self.interval_seconds)
             except Exception as e:
-                logger.error(f"Error in scheduler: {e}")
+                logger.error(f"===>> Error in scheduler cycle #{cycle_count}: {e}")
                 # Continue running even if there's an error
                 time.sleep(self.interval_seconds)
                 
     def _process_data(self):
         """Fetch data from all buckets, send to backend API, and delete it."""
         try:
+            logger.info("===>> Starting data processing cycle")
+            
             # Get stored token and URL from JSON storage
             from aw_datastore.storages.token_manager import TokenManager
             token_manager = TokenManager(testing=False)
             token_data = token_manager.get_token_data()
             if not token_data:
-                logger.debug("No authentication token found, skipping data processing")
+                logger.info("===>> No authentication token found, skipping data processing")
                 return
             
             token, api_url = token_data
+            logger.info(f"===>> Authentication configured, API URL: {api_url}")
             
             # Get all buckets
             buckets = self.api.get_buckets()
             if not buckets:
+                logger.info("===>> No buckets found, skipping data processing")
                 return
                 
+            logger.info(f"===>> Found {len(buckets)} buckets to process")
             total_events_processed = 0
             total_events_deleted = 0
             
@@ -89,17 +101,29 @@ class DataScheduler:
                     events_processed, events_data = self._collect_bucket_events(bucket_id)
                     total_events_processed += events_processed
                     all_events.extend(events_data)
+                    if events_processed > 0:
+                        logger.info(f"===>> Collected {events_processed} events from bucket {bucket_id}")
                 except Exception as e:
-                    logger.error(f"Error collecting events from bucket {bucket_id}: {e}")
+                    logger.error(f"===>> Error collecting events from bucket {bucket_id}: {e}")
             
             if not all_events:
+                logger.info("===>> No events to process, skipping API call")
                 return
             
+            logger.info(f"===>> Total events collected: {len(all_events)}")
+            
             # Send events to backend API (deletion handled internally)
-            self._send_events_to_api(all_events, token, api_url)
+            success = self._send_events_to_api(all_events, token, api_url)
+            if success:
+                logger.info(f"===>> Successfully processed {len(all_events)} events")
+            else:
+                logger.error(f"===>> Failed to process {len(all_events)} events")
             
         except Exception as e:
-            logger.error(f"Error in data processing: {e}")
+            logger.error(f"===>> Error in data processing: {e}")
+            logger.error(f"===>> Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"===>> Full traceback: {traceback.format_exc()}")
             
     def _collect_bucket_events(self, bucket_id: str) -> tuple[int, List[Dict]]:
         """
@@ -142,17 +166,29 @@ class DataScheduler:
     def _send_events_to_api(self, events: List[Dict], token: str, api_url: str) -> bool:
         """Send events to the backend API in batches of max 100 events."""
         
+        logger.info(f"===>> Starting API call to {api_url} with {len(events)} events in batches of {BATCH_SIZE}")
         successfully_sent = []
+        total_batches = (len(events) + BATCH_SIZE - 1) // BATCH_SIZE
+        batch_count = 0
         
         for batch in chunks(events, BATCH_SIZE):
+            batch_count += 1
+            logger.info(f"===>> Sending batch {batch_count}/{total_batches} ({len(batch)} events)")
+            
             if self._send_single_batch(batch, token, api_url):
                 successfully_sent.extend(batch)
+                logger.info(f"===>> Batch {batch_count}/{total_batches} sent successfully")
             else:
+                logger.error(f"===>> Batch {batch_count}/{total_batches} failed, stopping")
                 break
         
         # Delete successfully sent events
         if successfully_sent:
+            logger.info(f"===>> Deleting {len(successfully_sent)} successfully sent events from local storage")
             self._delete_successfully_sent_events(successfully_sent)
+        
+        success_rate = len(successfully_sent) / len(events) * 100 if events else 0
+        logger.info(f"===>> API call completed: {len(successfully_sent)}/{len(events)} events sent ({success_rate:.1f}% success rate)")
         
         return len(successfully_sent) == len(events)
 
@@ -161,23 +197,62 @@ class DataScheduler:
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
         def make_request():
-            response = requests.post(api_url, json=batch, headers=headers, timeout=30)
-            if 200 <= response.status_code < 300:
-                return True
-            elif 400 <= response.status_code < 500:
-                return False  # Don't retry client errors
-            else:
-                raise requests.RequestException(f"Server error {response.status_code}")
+            logger.info(f"===>> Making HTTP POST request to {api_url}")
+            start_time = time.time()
+            
+            try:
+                response = requests.post(api_url, json=batch, headers=headers, timeout=30)
+                response_time = time.time() - start_time
+                
+                # Check if response is None (shouldn't happen but let's be safe)
+                if response is None:
+                    logger.error("===>> API call returned None response")
+                    raise requests.RequestException("API call returned None response")
+                
+                logger.info(f"===>> API response: {response.status_code} in {response_time:.2f}s")
+                
+                if 200 <= response.status_code < 300:
+                    logger.info(f"===>> API call successful: {response.status_code}")
+                    return True
+                elif 400 <= response.status_code < 500:
+                    logger.error(f"===>> API client error: {response.status_code} - {response.text}")
+                    return False  # Don't retry client errors
+                else:
+                    logger.error(f"===>> API server error: {response.status_code} - {response.text}")
+                    raise requests.RequestException(f"Server error {response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                response_time = time.time() - start_time
+                logger.error(f"===>> API request failed after {response_time:.2f}s: {e}")
+                raise
+            except Exception as e:
+                response_time = time.time() - start_time
+                logger.error(f"===>> Unexpected error during API request after {response_time:.2f}s: {e}")
+                raise requests.RequestException(f"Unexpected error: {e}")
         
-        return retry_api_call(make_request, max_attempts=3, base_delay=0.5)
+        try:
+            return retry_api_call(make_request, max_attempts=3, base_delay=0.5)
+        except Exception as e:
+            logger.error(f"===>> API call failed after retries: {e}")
+            return False
 
     def _delete_successfully_sent_events(self, events: List[Dict]) -> None:
         """Delete events that were successfully sent to API."""
+        deleted_count = 0
+        failed_count = 0
+        
         for event in events:
             try:
-                self.api.delete_event(event['bucket_id'], event['id'])
-            except Exception:
-                pass  # Log but don't fail the entire operation
+                success = self.api.delete_event(event['bucket_id'], event['id'])
+                if success:
+                    deleted_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"===>> Failed to delete event {event.get('id')} from bucket {event.get('bucket_id')}: {e}")
+        
+        logger.info(f"===>> Event deletion completed: {deleted_count} deleted, {failed_count} failed")
 
     def _delete_bucket_events(self, bucket_id: str) -> int:
         """
@@ -232,11 +307,13 @@ def start_scheduler(api_instance, interval_minutes: int = 10):
     global _scheduler_instance
     
     if _scheduler_instance is not None:
-        logger.warning("Scheduler is already initialized")
+        logger.warning("===>> Scheduler is already initialized")
         return
         
+    logger.info(f"===>> Initializing global DataScheduler with {interval_minutes} minute interval")
     _scheduler_instance = DataScheduler(api_instance, interval_minutes)
     _scheduler_instance.start()
+    logger.info("===>> Global DataScheduler started successfully")
     
 
 def stop_scheduler():
@@ -244,5 +321,9 @@ def stop_scheduler():
     global _scheduler_instance
     
     if _scheduler_instance is not None:
+        logger.info("===>> Stopping global DataScheduler")
         _scheduler_instance.stop()
         _scheduler_instance = None
+        logger.info("===>> Global DataScheduler stopped successfully")
+    else:
+        logger.info("===>> No scheduler instance to stop")
