@@ -214,6 +214,11 @@ class DataScheduler:
                 if 200 <= response.status_code < 300:
                     logger.info(f"===>> API call successful: {response.status_code}")
                     return True
+                elif response.status_code == 401:
+                    logger.error(f"===>> Authentication failed (401) - Token expired or invalid")
+                    logger.error(f"===>> User needs to re-authenticate via samay:// URL scheme")
+                    logger.error(f"===>> Response: {response.text}")
+                    return False
                 elif 400 <= response.status_code < 500:
                     logger.error(f"===>> API client error: {response.status_code} - {response.text}")
                     return False  # Don't retry client errors
@@ -241,16 +246,27 @@ class DataScheduler:
         deleted_count = 0
         failed_count = 0
         
+        logger.info(f"===>> Deleting {len(events)} successfully sent events")
+        
         for event in events:
             try:
-                success = self.api.delete_event(event['bucket_id'], event['id'])
+                bucket_id = event.get('bucket_id')
+                event_id = event.get('id')
+                
+                if not bucket_id or event_id is None:
+                    logger.warning(f"===>> Skipping event with missing bucket_id or id")
+                    failed_count += 1
+                    continue
+                
+                success = self.api.delete_event(bucket_id, event_id)
                 if success:
                     deleted_count += 1
                 else:
                     failed_count += 1
+                    logger.warning(f"===>> Failed to delete event {event_id} from bucket {bucket_id}")
             except Exception as e:
                 failed_count += 1
-                logger.warning(f"===>> Failed to delete event {event.get('id')} from bucket {event.get('bucket_id')}: {e}")
+                logger.warning(f"===>> Exception deleting event {event.get('id')} from bucket {event.get('bucket_id')}: {e}")
         
         logger.info(f"===>> Event deletion completed: {deleted_count} deleted, {failed_count} failed")
 
