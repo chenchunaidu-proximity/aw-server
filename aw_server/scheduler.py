@@ -43,7 +43,6 @@ class DataScheduler:
         self.running = True
         self.thread = threading.Thread(target=self._run_scheduler, daemon=True)
         self.thread.start()
-        logger.info("===>> DataScheduler thread started successfully")
         
     def stop(self):
         """Stop the scheduler."""
@@ -114,9 +113,7 @@ class DataScheduler:
             
             # Send events to backend API (deletion handled internally)
             success = self._send_events_to_api(all_events, token, api_url)
-            if success:
-                logger.info(f"===>> Successfully processed {len(all_events)} events")
-            else:
+            if not success:
                 logger.error(f"===>> Failed to process {len(all_events)} events")
             
         except Exception as e:
@@ -177,18 +174,13 @@ class DataScheduler:
             
             if self._send_single_batch(batch, token, api_url):
                 successfully_sent.extend(batch)
-                logger.info(f"===>> Batch {batch_count}/{total_batches} sent successfully")
             else:
                 logger.error(f"===>> Batch {batch_count}/{total_batches} failed, stopping")
                 break
         
         # Delete successfully sent events
         if successfully_sent:
-            logger.info(f"===>> Deleting {len(successfully_sent)} successfully sent events from local storage")
             self._delete_successfully_sent_events(successfully_sent)
-        
-        success_rate = len(successfully_sent) / len(events) * 100 if events else 0
-        logger.info(f"===>> API call completed: {len(successfully_sent)}/{len(events)} events sent ({success_rate:.1f}% success rate)")
         
         return len(successfully_sent) == len(events)
 
@@ -242,7 +234,7 @@ class DataScheduler:
             return False
 
     def _delete_successfully_sent_events(self, events: List[Dict]) -> None:
-        """Delete events that were successfully sent to API."""
+        """Delete events that were sent to API."""
         deleted_count = 0
         failed_count = 0
         
@@ -278,7 +270,7 @@ class DataScheduler:
             bucket_id: The bucket ID
             
         Returns:
-            Number of events successfully deleted
+            Number of events deleted
         """
         try:
             # Get all events from the bucket
@@ -329,7 +321,6 @@ def start_scheduler(api_instance, interval_minutes: int = 10):
     logger.info(f"===>> Initializing global DataScheduler with {interval_minutes} minute interval")
     _scheduler_instance = DataScheduler(api_instance, interval_minutes)
     _scheduler_instance.start()
-    logger.info("===>> Global DataScheduler started successfully")
     
 
 def stop_scheduler():
@@ -340,6 +331,5 @@ def stop_scheduler():
         logger.info("===>> Stopping global DataScheduler")
         _scheduler_instance.stop()
         _scheduler_instance = None
-        logger.info("===>> Global DataScheduler stopped successfully")
     else:
         logger.info("===>> No scheduler instance to stop")
