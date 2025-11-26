@@ -63,7 +63,6 @@ class AWFlask(Flask):
         self.api = ServerAPI(db=db, testing=testing)
 
         # Start the data scheduler
-        logger.info(f"===>> Initializing scheduler with {scheduler_interval_minutes} minute interval")
         start_scheduler(self.api, scheduler_interval_minutes)
 
         self.register_blueprint(root)
